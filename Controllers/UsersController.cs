@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
 using APBD_zaj11.Contexts;
 using APBD_zaj11.DTOs;
@@ -30,18 +31,6 @@ public class UsersController(IConfiguration configuration, DatabaseContext conte
         };
         context.Users.Add(newUser);
         context.SaveChanges();
-        
-        // SymmetricSecurityKey key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["JWT:Key"]));
-        //
-        // SigningCredentials creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        //
-        // JwtSecurityToken token = new JwtSecurityToken(
-        //     issuer: configuration["JWT:Issuer"],
-        //     audience: configuration["JWT:Audience"],
-        //     expires: DateTime.Now.AddMinutes(10),
-        //     signingCredentials: creds
-        // );
-        
 
         return Ok($"User {newUserModel.Login} successfully added");
     }
@@ -74,8 +63,9 @@ public class UsersController(IConfiguration configuration, DatabaseContext conte
             signingCredentials: creds
         );
 
-        user.RefreshToken = new JwtSecurityTokenHandler().WriteToken(token);
+        user.RefreshToken = SecurityHelper.GenerateRefreshToken();
         user.RefreshTokenExp = DateTime.Now.AddDays(1);
+        context.SaveChanges();
 
         return Ok(new
         {
@@ -83,5 +73,48 @@ public class UsersController(IConfiguration configuration, DatabaseContext conte
             user.RefreshToken
         });
     }
-    
+
+    [Authorize]
+    [HttpPost("refresh")]
+    public IActionResult RefreshUserToken(RefreshTokenDTO refreshToken)
+    {
+        var user = context.Users.FirstOrDefault(u => u.RefreshToken == refreshToken.RefreshToken);
+        if (user is null)
+        {
+            throw new SecurityTokenException("Invalid refresh token");
+        }
+
+        if (user.RefreshTokenExp < DateTime.Now)
+        {
+            throw new SecurityTokenException("Refresh token has expired");
+        }
+        
+        SymmetricSecurityKey key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["JWT:Key"]));
+        
+        SigningCredentials creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        
+        JwtSecurityToken token = new JwtSecurityToken(
+            issuer: configuration["JWT:Issuer"],
+            audience: configuration["JWT:Audience"],
+            expires: DateTime.Now.AddMinutes(10),
+            signingCredentials: creds
+        );
+
+        user.RefreshToken = SecurityHelper.GenerateRefreshToken();
+        user.RefreshTokenExp = DateTime.Now.AddDays(1);
+        context.SaveChanges();
+
+        return Ok(new
+        {
+            AccessToken = new JwtSecurityTokenHandler().WriteToken(token),
+            user.RefreshToken
+        });
+    }
+
+    [Authorize]
+    [HttpGet("email")]
+    public IActionResult GetEmail()
+    {
+        return Ok($"Good good!!!");
+    }
 }
